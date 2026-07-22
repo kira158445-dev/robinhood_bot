@@ -23,7 +23,7 @@ export const EVENTS = {
 };
 
 export const SETTINGS = {
-  pollIntervalMs: Number(process.env.POLL_INTERVAL_MS || 8000),
+  pollIntervalMs: Number(process.env.POLL_INTERVAL_MS || 12000),
   logChunkSize: BigInt(process.env.LOG_CHUNK_SIZE || 1000),
   stateFile: process.env.STATE_FILE || "./data/state.json",
   runOnce:
