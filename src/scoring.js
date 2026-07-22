@@ -14,7 +14,9 @@ export function scoreLaunch(launch, swaps, transfers = [], tokenState = {}, now 
     (swap) => swap.sender.toLowerCase() === launch.creator.toLowerCase(),
   );
   const buySellRatio = buys.length / Math.max(1, sells.length);
-  const liquidityEth = estimateCurrentPairLiquidity(swaps);
+  const liquidityEth = launch.poolWethBalance
+    ? Number(BigInt(launch.poolWethBalance)) / 1e18
+    : estimateCurrentPairLiquidity(swaps);
   const graduationProgress =
     launch.graduation?.progress ??
     Math.min(100, (liquidityEth / PONS.defaultGraduationThresholdEth) * 100);
@@ -96,8 +98,11 @@ export function evaluateMomentum(stats, snapshots = [], launch = {}) {
   }
   const hasMcapGrowth = mcapGrowthPercent >= 20;
 
+  const isPons = launch.dexId !== "uniswap_v2";
+  const minMcapThreshold = isPons ? SETTINGS.minMarketCapUsd : (SETTINGS.minNonPonsMarketCapUsd || 70000);
+
   const momentumSignals = [hasBuyVolume, hasBuyers, hasBuyPressure, hasMcapGrowth].filter(Boolean).length;
-  const isGainingMomentum = stats.graduated && stats.marketCapUsd >= SETTINGS.minMarketCapUsd && momentumSignals >= 2;
+  const isGainingMomentum = stats.graduated && stats.marketCapUsd >= minMcapThreshold && momentumSignals >= 2;
 
   return {
     recentlyMigrated,
@@ -137,7 +142,7 @@ export function estimateMarketCapUsd(launch, swaps = []) {
     }
   }
 
-  const pairedEth = Number(launch.graduation?.pairedPrincipal || 0) / 1e18 || estimateCurrentPairLiquidity(swaps);
+  const pairedEth = Number(launch.poolWethBalance || 0) / 1e18 || Number(launch.graduation?.pairedPrincipal || 0) / 1e18 || estimateCurrentPairLiquidity(swaps);
   return Math.round(pairedEth * 2 * ethPrice);
 }
 
