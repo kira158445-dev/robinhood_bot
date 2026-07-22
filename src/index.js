@@ -4,9 +4,11 @@ import {
   decodeTransfer,
   eventId,
   shortAddress,
+  decodeUniswapV2PairCreated,
+  decodeUniswapV2Swap,
 } from "./abi.js";
-import { EVENTS, PONS, SETTINGS } from "./config.js";
-import { readGraduationStatus, readTokenMetadata } from "./contracts.js";
+import { EVENTS, PONS, SETTINGS, UNISWAP_V2 } from "./config.js";
+import { readGraduationStatus, readTokenMetadata, readWethBalance } from "./contracts.js";
 import { getLogsChunked, RpcClient } from "./rpc.js";
 import http from "node:http";
 import { loadState, saveState } from "./store.js";
@@ -49,6 +51,10 @@ async function main() {
 
     await sleep(SETTINGS.pollIntervalMs);
   } while (true);
+
+  if (SETTINGS.runOnce) {
+    process.exit(0);
+  }
 }
 
 async function poll(state) {
@@ -66,6 +72,7 @@ async function poll(state) {
 
   await runStep(warnings, "active factory", () => indexFactory(state, PONS.activeFactory, latestBlock));
   await runStep(warnings, "legacy factory", () => indexFactory(state, PONS.legacyFactory, latestBlock));
+  await runStep(warnings, "uniswap v2 factory", () => indexFactory(state, UNISWAP_V2.factory, latestBlock));
   await runStep(warnings, "launch times", () => hydrateLaunchTimes(state));
   await runStep(warnings, "token reads", () => hydrateTokenReads(state));
   await runStep(warnings, "pool swaps", () => indexPoolSwaps(state, latestBlock));
@@ -90,19 +97,27 @@ async function indexFactory(state, factory, latestBlock) {
     return;
   }
 
+  const isV2 = key === UNISWAP_V2.factory.toLowerCase();
+  const topic = isV2 ? EVENTS.uniswapV2PairCreatedTopic : EVENTS.tokenLaunchedTopic;
+
   const logs = await getLogsChunked(
     client,
     {
       address: factory,
       fromBlock: cursor,
       toBlock: latestBlock,
-      topics: [EVENTS.tokenLaunchedTopic],
+      topics: [topic],
     },
     SETTINGS.logChunkSize,
   );
 
   for (const log of logs) {
-    const launch = decodeTokenLaunched(log);
+    let launch;
+    if (isV2) {
+      launch = decodeUniswapV2PairCreated(log);
+    } else {
+      launch = decodeTokenLaunched(log);
+    }
     launch.sourceFactory = factory.toLowerCase();
     const timestamp = await getBlockTimestamp(state, BigInt(log.blockNumber));
     launch.launchTime = new Date(timestamp * 1000).toISOString();
@@ -130,20 +145,25 @@ async function indexPoolSwaps(state, latestBlock) {
       continue;
     }
 
+    const swapTopic = launch.dexId === "uniswap_v2" ? EVENTS.v2SwapTopic : EVENTS.swapTopic;
     const logs = await getLogsChunked(
       client,
       {
         address: pool,
         fromBlock,
         toBlock: latestBlock,
-        topics: [EVENTS.swapTopic],
+        topics: [swapTopic],
       },
       SETTINGS.logChunkSize,
     );
 
     for (const log of logs) {
       const id = eventId(log);
-      state.swaps[id] ||= decodeSwap(log, launch);
+      if (launch.dexId === "uniswap_v2") {
+        state.swaps[id] ||= decodeUniswapV2Swap(log, launch);
+      } else {
+        state.swaps[id] ||= decodeSwap(log, launch);
+      }
     }
 
     state.poolScanBlocks[pool] = latestBlock.toString();
@@ -253,7 +273,9 @@ async function checkAndNotify(state) {
     const momentumData = evaluateMomentum(stats, snapshots, launch);
 
     const isGraduated = !SETTINGS.requireGraduated || stats.graduated;
-    const hasMinMcap = stats.marketCapUsd >= SETTINGS.minMarketCapUsd;
+    const isPons = launch.dexId !== "uniswap_v2";
+    const minMcapThreshold = isPons ? SETTINGS.minMarketCapUsd : SETTINGS.minNonPonsMarketCapUsd;
+    const hasMinMcap = stats.marketCapUsd >= minMcapThreshold;
 
     // 1. Initial Notification (first time meeting mcap + graduation)
     if (isGraduated && hasMinMcap && !state.notifiedTokens[token]) {
@@ -476,12 +498,39 @@ async function hydrateTokenReads(state) {
       return;
     }
 
-    try {
-      const factory = launch.sourceFactory || PONS.activeFactory;
-      launch.graduation = await readGraduationStatus(client, factory, launch.token);
-      remaining -= 1;
-    } catch (error) {
-      launch.graduationError = error.message;
+    // Handle graduation status
+    if (launch.dexId === "uniswap_v2") {
+      launch.graduation = {
+        pairedPrincipal: "0",
+        threshold: "0",
+        graduated: true,
+        progress: 100,
+      };
+    } else if (!launch.graduation || !launch.graduation.graduated) {
+      try {
+        const factory = launch.sourceFactory || PONS.activeFactory;
+        launch.graduation = await readGraduationStatus(client, factory, launch.token);
+        remaining -= 1;
+      } catch (error) {
+        launch.graduationError = error.message;
+      }
+    }
+
+    if (remaining <= 0) {
+      return;
+    }
+
+    // Periodically update pool's WETH balance for accurate liquidity tracking
+    const now = Date.now();
+    const needsWethBal = !launch.poolWethBalance || (now - (launch.poolWethBalanceUpdatedAt || 0) > 60 * 1000);
+    if (needsWethBal) {
+      try {
+        launch.poolWethBalance = await readWethBalance(client, PONS.weth, launch.pool);
+        launch.poolWethBalanceUpdatedAt = now;
+        remaining -= 1;
+      } catch (error) {
+        launch.poolWethBalanceError = error.message;
+      }
     }
   }
 }
@@ -506,8 +555,8 @@ function launchesByPriority(state) {
   const cutoffMs = Date.now() - maxAgeHours * 60 * 60 * 1000;
 
   return Object.values(state.launches).sort((left, right) => {
-    const leftGrad = Boolean(left.graduation?.graduated);
-    const rightGrad = Boolean(right.graduation?.graduated);
+    const leftGrad = Boolean(left.graduation?.graduated) || left.dexId === "uniswap_v2";
+    const rightGrad = Boolean(right.graduation?.graduated) || right.dexId === "uniswap_v2";
 
     // Graduated tokens first
     if (leftGrad && !rightGrad) return -1;
