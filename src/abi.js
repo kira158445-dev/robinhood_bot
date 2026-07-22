@@ -113,3 +113,76 @@ function weiToEth(wei) {
 function strip0x(value) {
   return value.startsWith("0x") ? value.slice(2) : value;
 }
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+export function decodeUniswapV2PairCreated(log) {
+  const words = splitWords(log.data);
+  const token0 = topicAddress(log.topics[1]);
+  const token1 = topicAddress(log.topics[2]);
+  const pair = wordAddress(words[0]);
+  
+  const weth = "0x0bd7d308f8e1639fab988df18a8011f41eacad73";
+  const usdg = "0x5fc5360d0400a0fd4f2af552add042d716f1d168";
+  
+  let token = token1;
+  let pairToken = token0;
+  
+  if (token0 === weth || token0 === usdg) {
+    token = token1;
+    pairToken = token0;
+  } else if (token1 === weth || token1 === usdg) {
+    token = token0;
+    pairToken = token1;
+  }
+  
+  return {
+    token,
+    creator: ZERO_ADDRESS,
+    dexFactory: log.address.toLowerCase(),
+    pairToken,
+    pool: pair,
+    dexId: "uniswap_v2",
+    launchConfigId: "0",
+    positionId: "0",
+    restrictionsEndBlock: "0",
+    initialBuyAmount: "0",
+    launchBlock: BigInt(log.blockNumber).toString(),
+    launchTx: log.transactionHash,
+  };
+}
+
+export function decodeUniswapV2Swap(log, launch) {
+  const words = splitWords(log.data);
+  const amount0In = unsigned(words[0]);
+  const amount1In = unsigned(words[1]);
+  const amount0Out = unsigned(words[2]);
+  const amount1Out = unsigned(words[3]);
+
+  // Net change in pool balances: In - Out
+  const amount0 = amount0In - amount0Out;
+  const amount1 = amount1In - amount1Out;
+
+  const tokenIsToken0 = addressBigInt(launch.token) < addressBigInt(launch.pairToken);
+  const pairAmount = tokenIsToken0 ? amount1 : amount0;
+  const tokenAmount = tokenIsToken0 ? amount0 : amount1;
+
+  return {
+    token: launch.token,
+    pool: launch.pool,
+    sender: topicAddress(log.topics[1]),
+    recipient: topicAddress(log.topics[2]),
+    amount0: amount0.toString(),
+    amount1: amount1.toString(),
+    pairAmount: pairAmount.toString(),
+    tokenAmount: tokenAmount.toString(),
+    side: pairAmount > 0n ? "buy" : "sell",
+    pairAmountEth: weiToEth(abs(pairAmount)),
+    tokenAmountRaw: abs(tokenAmount).toString(),
+    blockNumber: BigInt(log.blockNumber).toString(),
+    transactionHash: log.transactionHash,
+    logIndex: Number(BigInt(log.logIndex)),
+    observedAt: Date.now(),
+  };
+}
+
