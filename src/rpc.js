@@ -2,26 +2,49 @@ import { SETTINGS } from "./config.js";
 
 let nextId = 1;
 
+const MAX_RETRIES = 6;
+const BASE_BACKOFF_MS = 2000;
+
+async function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class RpcClient {
   constructor(url) {
     this.url = url;
   }
 
-  async call(method, params = []) {
+  async call(method, params = [], attempt = 0) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), SETTINGS.rpcTimeoutMs);
 
-    const response = await fetch(this.url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: nextId++,
-        method,
-        params,
-      }),
-    }).finally(() => clearTimeout(timeout));
+    let response;
+    try {
+      response = await fetch(this.url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: nextId++,
+          method,
+          params,
+        }),
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    // Rate limited — back off and retry automatically
+    if (response.status === 429) {
+      if (attempt >= MAX_RETRIES) {
+        throw new Error(`RPC HTTP 429 for ${method} (exhausted ${MAX_RETRIES} retries)`);
+      }
+      const backoff = BASE_BACKOFF_MS * Math.pow(2, attempt);
+      console.warn(`[RPC] 429 rate limit on ${method}. Backing off ${backoff}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`);
+      await sleep(backoff);
+      return this.call(method, params, attempt + 1);
+    }
 
     if (!response.ok) {
       throw new Error(`RPC HTTP ${response.status} for ${method}`);
