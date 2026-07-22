@@ -13,11 +13,20 @@ export const PONS = {
   defaultGraduationThresholdEth: 4.2,
 };
 
+export const UNISWAP_V2 = {
+  factory: "0x8bcEaA40B9AcdfAedF85AdF4FF01F5Ad6517937f",
+  factoryStartBlock: 8600000n,
+};
+
 export const EVENTS = {
   tokenLaunchedTopic:
     "0xdb51ea9ad51ab453a65a4cb7e60c3cb378c9501bb002609f8f97778fb6c4235a",
+  uniswapV2PairCreatedTopic:
+    "0x0d3648bd0c661b327b73850729fdb99440a0259b583c5d83738b5f041d7c48f4",
   swapTopic:
     "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67",
+  v2SwapTopic:
+    "0xd78d022841b0b55795b7028d3637e26f17e07af87c9f35c07c77114c852c7244",
   transferTopic:
     "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 };
@@ -38,6 +47,7 @@ export const SETTINGS = {
   maxTransferTokensPerPoll: Number(process.env.MAX_TRANSFER_TOKENS_PER_POLL || 25),
   rpcTimeoutMs: Number(process.env.RPC_TIMEOUT_MS || 15000),
   minMarketCapUsd: Number(process.env.MIN_MARKET_CAP_USD || 50000),
+  minNonPonsMarketCapUsd: Number(process.env.MIN_NON_PONS_MARKET_CAP_USD || 70000),
   requireGraduated: String(process.env.REQUIRE_GRADUATED || "true").toLowerCase() === "true",
   ethPriceUsd: Number(process.env.ETH_PRICE_USD || 1800),
   whatsappEnabled: String(process.env.WHATSAPP_ENABLED || "true").toLowerCase() === "true",
