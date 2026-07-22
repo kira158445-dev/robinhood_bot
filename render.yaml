@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: robinhood-bot
+    env: node
+    plan: free
+    buildCommand: npm ci --only=production
+    startCommand: npm start
+    envVars:
+      - key: MIN_MARKET_CAP_USD
+        value: "50000"
+      - key: REQUIRE_GRADUATED
+        value: "true"
+      - key: ETH_PRICE_USD
+        value: "1800"
+      - key: WHATSAPP_ENABLED
+        value: "true"
+      - key: WHATSAPP_PROVIDER
+        value: "twilio"
