@@ -493,9 +493,35 @@ function emptyTokenState() {
 }
 
 function launchesNewestFirst(state) {
-  return Object.values(state.launches).sort(
-    (left, right) => Number(BigInt(right.launchBlock) - BigInt(left.launchBlock)),
-  );
+  return launchesByPriority(state);
+}
+
+/**
+ * Sort launches so that:
+ *  1. Graduated (migrated) tokens always appear first — they need swap data for momentum detection
+ *  2. Within each group, newest launch block comes first
+ */
+function launchesByPriority(state) {
+  const maxAgeHours = SETTINGS.maxMigrationAgeHours || 24;
+  const cutoffMs = Date.now() - maxAgeHours * 60 * 60 * 1000;
+
+  return Object.values(state.launches).sort((left, right) => {
+    const leftGrad = Boolean(left.graduation?.graduated);
+    const rightGrad = Boolean(right.graduation?.graduated);
+
+    // Graduated tokens first
+    if (leftGrad && !rightGrad) return -1;
+    if (!leftGrad && rightGrad) return 1;
+
+    // Among non-graduated: recently launched tokens first (within momentum window)
+    const leftRecent = left.launchTime && new Date(left.launchTime).getTime() >= cutoffMs;
+    const rightRecent = right.launchTime && new Date(right.launchTime).getTime() >= cutoffMs;
+    if (leftRecent && !rightRecent) return -1;
+    if (!leftRecent && rightRecent) return 1;
+
+    // Within same group: newest block first
+    return Number(BigInt(right.launchBlock) - BigInt(left.launchBlock));
+  });
 }
 
 function applyTransfer(tokenState, transfer) {
