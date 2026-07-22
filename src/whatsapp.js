@@ -53,8 +53,13 @@ export function formatWhatsAppMessage(launch, stats) {
 
   const socialsText = socialList.length > 0 ? `\n🌐 *Socials:*\n${socialList.join("\n")}\n` : "";
 
+  const isPons = launch.dexId !== "uniswap_v2";
+  const title = isPons
+    ? `🚨 *NEW MIGRATED TOKEN (> $${(SETTINGS.minMarketCapUsd / 1000).toFixed(0)}k MCap)* 🚨`
+    : `🚨 *NEW ROBINHOOD TOKEN (> $${(SETTINGS.minNonPonsMarketCapUsd / 1000).toFixed(0)}k MCap)* 🚨`;
+
   return [
-    `🚨 *NEW MIGRATED TOKEN (> $50k MCap)* 🚨`,
+    title,
     ``,
     `📌 *Token:* ${symbol} (${name})`,
     `📝 *Address:* ${address}`,
@@ -102,9 +107,13 @@ export function formatMomentumWhatsAppMessage(launch, stats, momentumData = {}) 
 
   const socialsText = socialList.length > 0 ? `\n🌐 *Socials:*\n${socialList.join("\n")}\n` : "";
 
+  const isPons = launch.dexId !== "uniswap_v2";
+  const typeText = isPons ? "post-migration" : "on Uniswap V2";
+  const alertText = `⚡ *${symbol} is gaining strong momentum ${typeText}!*`;
+
   return [
     `🔥 *MOMENTUM SURGE ALERT* 🔥`,
-    `⚡ *${symbol} is gaining strong momentum post-migration!*`,
+    alertText,
     ``,
     `📌 *Token:* ${symbol} (${name})`,
     `📝 *Address:* ${address}`,
