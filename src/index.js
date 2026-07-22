@@ -33,10 +33,15 @@ async function main() {
   const state = await loadState(SETTINGS.stateFile);
 
   do {
-    const warnings = await poll(state);
-    await checkAndNotify(state);
-    await saveState(SETTINGS.stateFile, state);
-    printBoard(state, warnings);
+    try {
+      const warnings = await poll(state);
+      await checkAndNotify(state);
+      await saveState(SETTINGS.stateFile, state);
+      printBoard(state, warnings);
+    } catch (err) {
+      // Never crash — log and keep going on next poll
+      console.error(`[Bot] Poll cycle error (will retry): ${err.message}`);
+    }
 
     if (SETTINGS.runOnce) {
       break;
@@ -48,7 +53,16 @@ async function main() {
 
 async function poll(state) {
   const warnings = [];
-  const latestBlock = await client.blockNumber();
+
+  // Wrap blockNumber in runStep so a 429 (after all retries) just logs a warning
+  let latestBlock;
+  await runStep(warnings, "block number", async () => {
+    latestBlock = await client.blockNumber();
+  });
+
+  if (!latestBlock) {
+    return warnings; // RPC still rate-limited — skip this poll cycle gracefully
+  }
 
   await runStep(warnings, "active factory", () => indexFactory(state, PONS.activeFactory, latestBlock));
   await runStep(warnings, "legacy factory", () => indexFactory(state, PONS.legacyFactory, latestBlock));
@@ -58,6 +72,7 @@ async function poll(state) {
   await runStep(warnings, "token transfers", () => indexTokenTransfers(state, latestBlock));
 
   return warnings;
+
 }
 
 async function indexFactory(state, factory, latestBlock) {
