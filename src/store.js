@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { PONS } from "./config.js";
+import { PONS, UNISWAP_V2 } from "./config.js";
 
 export async function loadState(path) {
   try {
@@ -20,6 +20,7 @@ export async function saveState(path, state) {
 }
 
 export function normalizeState(state) {
+  const v2FactoryKey = UNISWAP_V2.factory.toLowerCase();
   return {
     factories: {
       [PONS.activeFactory.toLowerCase()]: {
@@ -33,6 +34,12 @@ export function normalizeState(state) {
         lastScannedBlock:
           state.factories?.[PONS.legacyFactory.toLowerCase()]?.lastScannedBlock ||
           (PONS.legacyFactoryStartBlock - 1n).toString(),
+      },
+      [v2FactoryKey]: {
+        startBlock: UNISWAP_V2.factoryStartBlock.toString(),
+        lastScannedBlock:
+          state.factories?.[v2FactoryKey]?.lastScannedBlock ||
+          (UNISWAP_V2.factoryStartBlock - 1n).toString(),
       },
     },
     launches: state.launches || {},
